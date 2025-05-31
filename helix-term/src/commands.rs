@@ -6945,57 +6945,88 @@ pub mod range_combination {
         ranges.sort_unstable_by_key(Range::from);
 
         let merge_ranges_map2 = |map_fn: &dyn Fn(&[Range]) -> Range| {
-            let ranges = ranges.windows(2).map(map_fn).collect();
+            let combined_ranges = ranges.windows(2).map(map_fn).collect();
 
-            Selection::new(ranges, doc_selection.primary_index())
+            Selection::new(combined_ranges, doc_selection.primary_index())
         };
 
         let combined_selection = match action {
-            Action::Append => doc_selection.append(saved_selection),
-            Action::Intersect => merge_ranges_map2(&|a| a[0].intersect(a[1])),
-            // Note: this is the same as merge selections
-            Action::Union => merge_ranges_map2(&|a| a[0].merge(a[1])),
+            Action::Append => Some(doc_selection.append(saved_selection)),
+            Action::Intersect => {
+                let mut saved_ranges = saved_selection.iter();
+                let mut doc_ranges = doc_selection.iter();
+                let mut combined_ranges = Vec::new();
+                let mut saved_range = saved_ranges.next();
+                let mut doc_range = doc_ranges.next();
+
+                while let (Some(saved_inner), Some(doc_inner)) = (saved_range, doc_range) {
+                    if let Some(intersection) = saved_inner.intersect(*doc_inner) {
+                        combined_ranges.push(intersection);
+                    }
+                    if saved_inner.to() < doc_inner.to() {
+                        saved_range = saved_ranges.next();
+                    } else {
+                        doc_range = doc_ranges.next();
+                    }
+                }
+
+                if combined_ranges.is_empty() {
+                    None
+                } else {
+                    Some(Selection::new(
+                        combined_ranges.into(),
+                        doc_selection.primary_index(),
+                    ))
+                }
+            }
+            // NOTE: this is the same as merge selections
+            Action::Union => Some(merge_ranges_map2(&|ranges| ranges[0].merge(ranges[1]))),
             Action::SelectLeftmostCursor => {
                 let left_most = ranges.first().unwrap();
-                Selection::from(*left_most)
+                Some(Selection::from(*left_most))
             }
             Action::SelectRightmostCursor => {
                 let right_most = ranges.last().unwrap();
-                Selection::from(*right_most)
+                Some(Selection::from(*right_most))
             }
             Action::SelectShortest => {
                 let shortest = ranges.iter().min_by_key(|range| range.width(text)).unwrap();
 
-                Selection::from(*shortest)
+                Some(Selection::from(*shortest))
             }
             Action::SelectLongest => {
                 let longest = ranges.iter().max_by_key(|range| range.width(text)).unwrap();
 
-                Selection::from(*longest)
+                Some(Selection::from(*longest))
             }
         };
 
-        let combined_range_count = combined_selection.ranges().len();
-        match destination {
-            Destination::Selection => {
-                doc.set_selection(view.id, combined_selection);
-                cx.editor.set_status(format!(
-                    "Combined {} range{} from [{}]",
-                    combined_range_count,
-                    if combined_range_count == 1 { "" } else { "s" },
-                    register
-                ));
+        if let Some(combined_selection) = combined_selection {
+            let combined_range_count = combined_selection.ranges().len();
+
+            match destination {
+                Destination::Selection => {
+                    doc.set_selection(view.id, combined_selection);
+                    cx.editor.set_status(format!(
+                        "Combined {} range{} from [{}]",
+                        combined_range_count,
+                        if combined_range_count == 1 { "" } else { "s" },
+                        register
+                    ));
+                }
+                Destination::Register => {
+                    doc.markers
+                        .insert(MarkerName::Register(register), combined_selection);
+                    cx.editor.set_status(format!(
+                        "Combined {} range{} to [{}]",
+                        combined_range_count,
+                        if combined_range_count == 1 { "" } else { "s" },
+                        register
+                    ));
+                }
             }
-            Destination::Register => {
-                doc.markers
-                    .insert(MarkerName::Register(register), combined_selection);
-                cx.editor.set_status(format!(
-                    "Combined {} range{} to [{}]",
-                    combined_range_count,
-                    if combined_range_count == 1 { "" } else { "s" },
-                    register
-                ));
-            }
+        } else {
+            cx.editor.set_error("No selections combined");
         }
     }
 }
