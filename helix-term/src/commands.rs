@@ -605,19 +605,19 @@ impl MappableCommand {
         save_selection_to_register, "Save selection to register",
         restore_selection, "Restore selection from register",
         append_selection_from_register, "Append selections from register",
-        append_selection_to_register, "Append selections and save to register",
-        union_selection_from_register, "Union selection-pairs from register",
-        union_selection_to_register, "Union selection-pairs and save to register",
-        intersect_selection_from_register, "Intersect selection-pairs from register",
-        intersect_selection_to_register, "Intersect selection-pairs to register",
-        select_leftmost_cursor_selection_from_register, "Select selection with leftmost cursor for each pair from register",
-        select_leftmost_cursor_selection_to_register, "Select selection with leftmost cursor for each pair and save to register",
-        select_rightmost_cursor_selection_from_register, "Select selection with rightmost cursor for each pair from register",
-        select_rightmost_cursor_selection_to_register, "Select selection with rightmost cursor for each pair and save to register",
-        select_shortest_selection_from_register, "Select shortest selection for each pair from register",
-        select_shortest_selection_to_register, "Select shortest selection for each pair and save to register",
-        select_longest_selection_from_register, "Select longest selection for each pair from register",
-        select_longest_selection_to_register, "Select longest selection for each pair and save to register",
+        append_selection_to_register, "Append selections to register",
+        union_selection_from_register, "Union selections from register",
+        union_selection_to_register, "Union selections to register",
+        intersect_selection_from_register, "Intersect selections from register",
+        intersect_selection_to_register, "Intersect selections to register",
+        select_leftmost_cursor_selection_from_register, "Select leftmost selection from register",
+        select_leftmost_cursor_selection_to_register, "Save leftmost selection to register",
+        select_rightmost_cursor_selection_from_register, "Select rightmost selection from register",
+        select_rightmost_cursor_selection_to_register, "Save rightmost selection to register",
+        select_shortest_selection_from_register, "Select shortest selection from register",
+        select_shortest_selection_to_register, "Save shortest selection to register",
+        select_longest_selection_from_register, "Select longest selection from register",
+        select_longest_selection_to_register, "Save longest selection to register",
     );
 }
 
@@ -6941,61 +6941,38 @@ pub mod range_combination {
             }
         };
 
-        let doc_ranges_count = doc_selection.ranges().len();
-        let saved_ranges_count = saved_selection.ranges().len();
+        let mut ranges = [doc_selection.ranges(), saved_selection.ranges()].concat();
+        ranges.sort_unstable_by_key(Range::from);
 
-        let merge_ranges_map = |map_fn: &dyn Fn((&Range, &Range)) -> Range| {
-            let ranges = doc_selection
-                .ranges()
-                .iter()
-                .zip(saved_selection.ranges().iter())
-                .map(map_fn)
-                .collect();
+        let merge_ranges_map2 = |map_fn: &dyn Fn(&[Range]) -> Range| {
+            let ranges = ranges.windows(2).map(map_fn).collect();
 
             Selection::new(ranges, doc_selection.primary_index())
         };
 
         let combined_selection = match action {
             Action::Append => doc_selection.append(saved_selection),
-            // The remaining combinations require the selections to have the same
-            // number of ranges.
-            _ if doc_ranges_count != saved_ranges_count => {
-                cx.editor.set_error(format!(
-                    "The two selections have different range counts: {} vs {}",
-                    saved_ranges_count, doc_ranges_count,
-                ));
-                return;
+            Action::Intersect => merge_ranges_map2(&|a| a[0].intersect(a[1])),
+            // Note: this is the same as merge selections
+            Action::Union => merge_ranges_map2(&|a| a[0].merge(a[1])),
+            Action::SelectLeftmostCursor => {
+                let left_most = ranges.first().unwrap();
+                Selection::from(*left_most)
             }
-            Action::Union => merge_ranges_map(&|(s, o)| s.merge(*o)),
-            Action::Intersect => merge_ranges_map(&|(s, o)| s.intersect(*o)),
-            Action::SelectLeftmostCursor => merge_ranges_map(&|(s, o)| {
-                if s.cursor(text) <= o.cursor(text) {
-                    *s
-                } else {
-                    *o
-                }
-            }),
-            Action::SelectRightmostCursor => merge_ranges_map(&|(s, o)| {
-                if s.cursor(text) > o.cursor(text) {
-                    *s
-                } else {
-                    *o
-                }
-            }),
-            Action::SelectShortest => merge_ranges_map(&|(s, o)| {
-                if s.width(text) <= o.width(text) {
-                    *s
-                } else {
-                    *o
-                }
-            }),
-            Action::SelectLongest => merge_ranges_map(&|(s, o)| {
-                if s.width(text) > o.width(text) {
-                    *s
-                } else {
-                    *o
-                }
-            }),
+            Action::SelectRightmostCursor => {
+                let right_most = ranges.last().unwrap();
+                Selection::from(*right_most)
+            }
+            Action::SelectShortest => {
+                let shortest = ranges.iter().min_by_key(|range| range.width(text)).unwrap();
+
+                Selection::from(*shortest)
+            }
+            Action::SelectLongest => {
+                let longest = ranges.iter().max_by_key(|range| range.width(text)).unwrap();
+
+                Selection::from(*longest)
+            }
         };
 
         let combined_range_count = combined_selection.ranges().len();
