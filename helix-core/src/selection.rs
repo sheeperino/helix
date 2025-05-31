@@ -246,14 +246,17 @@ impl Range {
     /// Returns a range that encompasses the intersection of the input ranges.
     ///
     /// If the input ranges overlap, the intersection is the area covered by
-    /// both input ranges. Otherwise, the intersection is the area between the
-    /// input ranges.
+    /// both input ranges. Otherwise, there is no intersection.
     ///
     /// The range is [Direction::Backward] if both input ranges are
     /// [Direction::Backward], [Direction::Forward] otherwise.
     #[must_use]
-    pub fn intersect(&self, other: Self) -> Self {
-        let sel = if self.anchor > self.head && other.anchor > other.head {
+    pub fn intersect(&self, other: Self) -> Option<Self> {
+        if !self.overlaps(&other) {
+            return None;
+        }
+
+        Some(if self.anchor > self.head && other.anchor > other.head {
             Range {
                 anchor: self.anchor.min(other.anchor),
                 head: self.head.max(other.head),
@@ -265,13 +268,7 @@ impl Range {
                 head: self.to().min(other.to()),
                 old_visual_position: None,
             }
-        };
-
-        if !self.overlaps(&other) {
-            return sel.flip();
-        }
-
-        sel
+        })
     }
 
     // groupAt
