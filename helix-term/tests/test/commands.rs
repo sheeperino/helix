@@ -947,9 +947,9 @@ async fn test_intersect_marker() -> anyhow::Result<()> {
         "},
         "^sjjmiw^ci",
         indoc! {"\
-                foo#[
-                bar\n|]#
-                baz
+                foo
+                bar
+                #[baz|]#
         "},
     ))
     .await?;
@@ -963,9 +963,9 @@ async fn test_intersect_marker() -> anyhow::Result<()> {
         "},
         "^sjjmiw<A-;>^ci",
         indoc! {"\
-                foo#[
-                bar\n|]#
-                baz
+                foo
+                bar
+                #[|baz]#
         "},
     ))
     .await?;
@@ -979,9 +979,9 @@ async fn test_intersect_marker() -> anyhow::Result<()> {
         "},
         "^sjjmiw<A-;>^ci",
         indoc! {"\
-                foo#[|
-                bar\n]#
-                baz
+                foo
+                bar
+                #[|baz]#
         "},
     ))
     .await?;
