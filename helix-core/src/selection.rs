@@ -271,6 +271,27 @@ impl Range {
         })
     }
 
+    #[must_use]
+    pub fn complement(&self, other: Self) -> Option<Self> {
+        if self.to() >= other.from() && other.to() >= self.from() {
+            return None;
+        }
+
+        Some(if self.anchor > self.head && other.anchor > other.head {
+            Range {
+                head: self.anchor.min(other.anchor),
+                anchor: self.head.max(other.head),
+                old_visual_position: None,
+            }
+        } else {
+            Range {
+                head: self.from().max(other.from()),
+                anchor: self.to().min(other.to()),
+                old_visual_position: None,
+            }
+        })
+    }
+
     // groupAt
 
     /// Returns the text inside this range given the text of the whole buffer.
@@ -666,6 +687,21 @@ impl Selection {
             .unwrap();
 
         self
+    }
+
+    /// Get the complement of all ranges
+    pub fn complement_ranges(self) -> Option<Self> {
+        let ranges: SmallVec<[Range; 1]> = self
+            .ranges
+            .windows(2)
+            .filter_map(|ranges| ranges[0].complement(ranges[1]))
+            .collect();
+
+        if ranges.is_empty() {
+            None
+        } else {
+            Some(Selection::new(ranges, 0))
+        }
     }
 
     #[must_use]

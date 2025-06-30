@@ -369,6 +369,7 @@ impl MappableCommand {
         split_selection_on_newline, "Split selection on newlines",
         merge_selections, "Merge selections",
         merge_consecutive_selections, "Merge consecutive selections",
+        invert_selections, "Get the selections complement",
         search, "Search for regex pattern",
         rsearch, "Reverse search for regex pattern",
         search_next, "Select next search match",
@@ -2142,6 +2143,15 @@ fn merge_consecutive_selections(cx: &mut Context) {
     let (view, doc) = current!(cx.editor);
     let selection = doc.selection(view.id).clone().merge_consecutive_ranges();
     doc.set_selection(view.id, selection);
+}
+
+fn invert_selections(cx: &mut Context) {
+    let (view, doc) = current!(cx.editor);
+    if let Some(selection) = doc.selection(view.id).clone().complement_ranges() {
+        doc.set_selection(view.id, selection);
+    } else {
+        cx.editor.set_error("No selections inverted");
+    };
 }
 
 #[allow(clippy::too_many_arguments)]
