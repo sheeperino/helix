@@ -335,15 +335,27 @@ where
     F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
 {
     let selection = context.doc.selection(context.view.id);
+    let marks_count = context
+        .doc
+        .markers
+        .get(&helix_view::document::MarkerName::Register('^'))
+        .map(|s| s.len())
+        .unwrap_or(0);
     let count = selection.len();
-    write(
-        context,
-        if count == 1 {
-            " 1 sel ".into()
+    write(context, {
+        let f = if count == 1 {
+            " 1 sel ".to_owned()
         } else {
-            format!(" {}/{count} sels ", selection.primary_index() + 1).into()
-        },
-    );
+            format!(" {}/{count} sels ", selection.primary_index() + 1)
+        };
+        if marks_count == 0 {
+            f.into()
+        } else if marks_count == 1 {
+            format!("{f}1 mark ").into()
+        } else {
+            format!("{f}{marks_count} marks ").into()
+        }
+    });
 }
 
 fn render_primary_selection_length<'a, F>(context: &mut RenderContext<'a>, write: F)
