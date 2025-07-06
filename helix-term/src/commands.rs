@@ -6969,9 +6969,7 @@ pub mod range_combination {
         let saved_selection = match doc.markers.get(&MarkerName::Register(register)) {
             Some(selection) => selection.clone(),
             None => {
-                cx.editor
-                    .set_error(format!("Register [{}] is empty", register));
-                return;
+                doc_selection.clone()
             }
         };
 
