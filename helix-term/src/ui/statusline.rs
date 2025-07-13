@@ -238,25 +238,25 @@ where
         match sev {
             Severity::Hint if hints > 0 => {
                 write(context, Span::styled("H", context.editor.theme.get("hint")));
-                write(context, format!(" {} ", hints).into());
+                write(context, format!(" {}", hints).into());
             }
             Severity::Info if info > 0 => {
                 write(context, Span::styled("I", context.editor.theme.get("info")));
-                write(context, format!(" {} ", info).into());
+                write(context, format!(" {}", info).into());
             }
             Severity::Warning if warnings > 0 => {
                 write(
                     context,
                     Span::styled("W", context.editor.theme.get("warning")),
                 );
-                write(context, format!(" {} ", warnings).into());
+                write(context, format!(" {}", warnings).into());
             }
             Severity::Error if errors > 0 => {
                 write(
                     context,
                     Span::styled("E", context.editor.theme.get("error")),
                 );
-                write(context, format!(" {} ", errors).into());
+                write(context, format!(" {}", errors).into());
             }
             _ => {}
         }
@@ -387,7 +387,7 @@ where
     let position = get_position(context);
     write(
         context,
-        format!(" {}:{} ", position.row + 1, position.col + 1).into(),
+        format!(" {}:{}", position.row + 1, position.col + 1).into(),
     );
 }
 
@@ -467,7 +467,7 @@ where
             .as_ref()
             .map(|p| p.to_string_lossy())
             .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
-        format!(" {} ", path)
+        format!(" {}", path)
     };
 
     write(context, title.into());
@@ -494,9 +494,9 @@ where
     F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
 {
     let title = if context.doc.is_modified() {
-        "[+]"
+        " [+]"
     } else {
-        "   "
+        ""
     };
 
     write(context, title.into());
@@ -506,11 +506,7 @@ fn render_read_only_indicator<'a, F>(context: &mut RenderContext<'a>, write: F)
 where
     F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
 {
-    let title = if context.doc.readonly {
-        " [readonly] "
-    } else {
-        ""
-    };
+    let title = if context.doc.readonly { " [ro]" } else { "" };
     write(context, title.into());
 }
 
@@ -524,7 +520,7 @@ where
             .as_ref()
             .and_then(|p| p.file_name().map(|s| s.to_string_lossy()))
             .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into());
-        format!(" {} ", path)
+        format!(" {}", path)
     };
 
     write(context, title.into());
@@ -565,7 +561,7 @@ where
     F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
 {
     if let Some(reg) = context.editor.selected_register {
-        write(context, format!(" reg={} ", reg).into())
+        write(context, format!(" reg={}", reg).into())
     }
 }
 
