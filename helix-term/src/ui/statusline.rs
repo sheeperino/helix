@@ -238,25 +238,25 @@ where
         match sev {
             Severity::Hint if hints > 0 => {
                 write(context, Span::styled("H", context.editor.theme.get("hint")));
-                write(context, format!(" {}", hints).into());
+                write(context, format!(" {} ", hints).into());
             }
             Severity::Info if info > 0 => {
                 write(context, Span::styled("I", context.editor.theme.get("info")));
-                write(context, format!(" {}", info).into());
+                write(context, format!(" {} ", info).into());
             }
             Severity::Warning if warnings > 0 => {
                 write(
                     context,
                     Span::styled("W", context.editor.theme.get("warning")),
                 );
-                write(context, format!(" {}", warnings).into());
+                write(context, format!(" {} ", warnings).into());
             }
             Severity::Error if errors > 0 => {
                 write(
                     context,
                     Span::styled("E", context.editor.theme.get("error")),
                 );
-                write(context, format!(" {}", errors).into());
+                write(context, format!(" {} ", errors).into());
             }
             _ => {}
         }
