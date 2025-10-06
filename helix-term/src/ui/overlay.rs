@@ -17,7 +17,7 @@ pub struct Overlay<T> {
     pub calc_child_size: Box<dyn Fn(Rect) -> Rect>,
 }
 
-/// Surrounds the component with a margin of 5% on each side, and an additional 2 rows at the bottom
+/// Surrounds the component with a margin of 5% on each side, and an additional 1 row at the bottom
 pub fn overlaid<T>(content: T) -> Overlay<T> {
     Overlay {
         content,
@@ -27,7 +27,7 @@ pub fn overlaid<T>(content: T) -> Overlay<T> {
             } else {
                 90
             };
-            clip_rect_relative(rect.clip_bottom(2), percentage, percentage)
+            clip_rect_relative(rect.clip_bottom(1), percentage, percentage)
         }),
     }
 }
