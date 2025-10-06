@@ -23,7 +23,7 @@ use tui::{
     buffer::Buffer as Surface,
     layout::Constraint,
     text::{Span, Spans},
-    widgets::{Block, Borders, BorderType, Cell, Row, Table},
+    widgets::{Block, Borders, Cell, Row, Table},
 };
 
 use tui::widgets::Widget;
@@ -696,7 +696,13 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         const BLOCK: Block<'_> = Block::borders(Block::new(), Borders::empty());
 
         // calculate the inner area inside the box
-        let inner = BLOCK.inner(area);
+        // HACK: hight be a problem with how render_table indexes stuff idk???
+        //       the result is that you'll end up with a slightly inaccurate picker in debug mode
+        let inner = if cfg!(debug_assertions) { // should be `overflow_checks` but still
+            BLOCK.inner(area).clip_right(1)
+        } else {
+            BLOCK.inner(area)
+        };
 
         BLOCK.render(area, surface);
 
@@ -713,8 +719,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             snapshot.item_count(),
         );
 
-        let area = inner.clip_left(1).with_height(1);
+        let area = inner.clip_left(2).with_height(1);
         let line_area = area.clip_right(count.len() as u16 + 1);
+        if let Some(cell) = surface.get_mut(0, inner.left()) {
+            cell.set_symbol(">");
+        }
 
         // render the prompt first since it will clear its background
         self.prompt.render(line_area, surface, cx);
@@ -727,18 +736,9 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             text_style,
         );
 
-        // -- Separator
-        let sep_style = cx.editor.theme.get("ui.background.separator");
-        let borders = BorderType::line_symbols(BorderType::Plain);
-        for x in inner.left()..inner.right() {
-            if let Some(cell) = surface.get_mut(x, inner.y + 1) {
-                cell.set_symbol(borders.horizontal).set_style(sep_style);
-            }
-        }
-
         // -- Render the contents:
         // subtract area of prompt from top
-        let inner = inner.clip_top(2);
+        let inner = inner.clip_top(1);
         let rows = inner.height.saturating_sub(self.header_height()) as u32;
         let offset = self.cursor - (self.cursor % std::cmp::max(1, rows));
         let cursor = self.cursor.saturating_sub(offset);
@@ -832,7 +832,6 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let mut table = Table::new(options)
             .style(text_style)
             .highlight_style(selected)
-            .highlight_symbol(" > ")
             .column_spacing(1)
             .widths(&self.widths);
 
@@ -1183,7 +1182,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         } else {
             area.width
         };
-        let prompt_area = inner.clip_left(1).with_height(1).with_width(picker_width);
+        let prompt_area = inner.clip_left(2).with_height(1).with_width(picker_width);
 
         self.prompt.cursor(prompt_area, editor)
     }
