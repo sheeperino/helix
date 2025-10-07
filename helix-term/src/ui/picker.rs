@@ -23,7 +23,7 @@ use tui::{
     buffer::Buffer as Surface,
     layout::Constraint,
     text::{Span, Spans},
-    widgets::{Block, Borders, Cell, Row, Table},
+    widgets::{Block, Borders, BorderType, Cell, Row, Table},
 };
 
 use tui::widgets::Widget;
@@ -720,7 +720,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         );
 
         let area = inner.clip_left(2).with_height(1);
-        let line_area = area.clip_right(count.len() as u16 + 1);
+        let line_area = area.clip_right(count.len() as u16);
         if let Some(cell) = surface.get_mut(0, inner.left()) {
             cell.set_symbol(">");
         }
@@ -729,7 +729,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         self.prompt.render(line_area, surface, cx);
 
         surface.set_stringn(
-            (area.x + area.width).saturating_sub(count.len() as u16 + 1),
+            (area.x + area.width).saturating_sub(count.len() as u16),
             area.y,
             &count,
             (count.len()).min(area.width as usize),
@@ -873,7 +873,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         );
     }
 
-    fn render_preview(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+    fn render_preview(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context, stack_vertically: bool) {
         // -- Render the frame:
         // clear area
         let background = cx.editor.theme.get("ui.background");
@@ -886,9 +886,19 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         // calculate the inner area inside the box
         let inner = BLOCK.inner(area);
         // 1 column gap on either side
-        let margin = Margin::horizontal(1);
-        let inner = inner.inner(margin);
+        let margin = Margin::horizontal(0);
+        let mut inner = inner.inner(margin);
         BLOCK.render(area, surface);
+
+        if stack_vertically {
+            let borders = BorderType::line_symbols(BorderType::Plain);
+            for x in inner.left()..inner.right() {
+                if let Some(cell) = surface.get_mut(x, inner.y) {
+                    cell.set_symbol(borders.horizontal);
+                }
+            }
+            inner = inner.clip_top(1);
+        }
 
         if let Some((preview, range)) = self.get_preview(cx.editor) {
             let doc = match preview.document() {
@@ -1051,7 +1061,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             } else {
                 area.clip_left(picker_area.width)
             };
-            self.render_preview(preview_area, surface, cx);
+            self.render_preview(preview_area, surface, cx, stack_vertically);
         }
     }
 
