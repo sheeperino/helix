@@ -4288,6 +4288,7 @@ fn goto_column_impl(cx: &mut Context, movement: Movement) {
         let pos = graphemes::nth_next_grapheme_boundary(text, line_start, count - 1).min(line_end);
         range.put_cursor(text, pos, movement == Movement::Extend)
     });
+    push_jump(view, doc);
     doc.set_selection(view.id, selection);
 }
 
@@ -4309,6 +4310,7 @@ fn goto_last_modification(cx: &mut Context) {
             .selection(view.id)
             .clone()
             .transform(|range| range.put_cursor(text, pos, cx.editor.mode == Mode::Select));
+        push_jump(view, doc);
         doc.set_selection(view.id, selection);
     }
 }
@@ -4360,6 +4362,7 @@ fn goto_first_diag(cx: &mut Context) {
         Some(diag) => Selection::single(diag.range.start, diag.range.end),
         None => return,
     };
+    push_jump(view, doc);
     doc.set_selection(view.id, selection);
     view.diagnostics_handler
         .immediately_show_diagnostic(doc, view.id);
@@ -4371,6 +4374,7 @@ fn goto_last_diag(cx: &mut Context) {
         Some(diag) => Selection::single(diag.range.start, diag.range.end),
         None => return,
     };
+    push_jump(view, doc);
     doc.set_selection(view.id, selection);
     view.diagnostics_handler
         .immediately_show_diagnostic(doc, view.id);
@@ -4394,6 +4398,7 @@ fn goto_next_diag(cx: &mut Context) {
             Some(diag) => Selection::single(diag.range.start, diag.range.end),
             None => return,
         };
+        push_jump(view, doc);
         doc.set_selection(view.id, selection);
         view.diagnostics_handler
             .immediately_show_diagnostic(doc, view.id);
@@ -4423,6 +4428,7 @@ fn goto_prev_diag(cx: &mut Context) {
             Some(diag) => Selection::single(diag.range.end, diag.range.start),
             None => return,
         };
+        push_jump(view, doc);
         doc.set_selection(view.id, selection);
         view.diagnostics_handler
             .immediately_show_diagnostic(doc, view.id);
@@ -4453,6 +4459,7 @@ fn goto_first_change_impl(cx: &mut Context, reverse: bool) {
         };
         if hunk != Hunk::NONE {
             let range = hunk_range(hunk, doc.text().slice(..));
+            push_jump(view, doc);
             doc.set_selection(view.id, Selection::single(range.anchor, range.head));
         }
     }
@@ -4508,6 +4515,7 @@ fn goto_next_change_impl(cx: &mut Context, direction: Direction) {
             }
         });
 
+        push_jump(view, doc);
         doc.set_selection(view.id, selection)
     };
     cx.editor.apply_motion(motion);
@@ -6330,6 +6338,7 @@ fn goto_ts_object_impl(cx: &mut Context, object: &'static str, direction: Direct
                 }
             });
 
+            push_jump(view, doc);
             doc.set_selection(view.id, selection);
         } else {
             editor.set_status("Syntax-tree is not available in current buffer");
