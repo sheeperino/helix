@@ -92,7 +92,7 @@ impl UriOrDocumentId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Tag {
     kind: TagKind,
     name: String,
@@ -145,6 +145,36 @@ fn tags_iter<'a>(
             doc: doc.clone(),
         });
     })
+}
+
+// TODO: global tags search
+// TODO: handle cases where there are more than 1 matches
+pub fn syntax_goto_definition(cx: &mut Context) {
+    let (view, doc) = current!(cx.editor);
+    let Some(syntax) = doc.syntax() else {
+        cx.editor
+            .set_error("Syntax tree is not available on this buffer");
+        return;
+    };
+    let doc_id = doc.id();
+    let text = doc.text().slice(..);
+    let sel = doc.selection(view.id).clone().primary().slice(text);
+    let loader = cx.editor.syn_loader.load();
+    let tags = tags_iter(syntax, &loader, text, UriOrDocumentId::Id(doc.id()), None);
+
+    let mut definition = None;
+    for tag in tags {
+        if sel == tag.name {
+            definition = Some(tag.clone());
+            break;
+        }
+    }
+    if let Some(tag) = definition {
+        doc.set_selection(view.id, Selection::single(tag.start, tag.end));
+    } else {
+        let err = format!("No definition found, text = {:?}", sel);
+        cx.editor.set_error(err);
+    }
 }
 
 pub fn syntax_symbol_picker(cx: &mut Context) {
