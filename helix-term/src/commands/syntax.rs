@@ -1,7 +1,9 @@
 use std::{
     collections::HashSet,
+    future::Future,
     iter,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::Arc,
 };
 
@@ -160,7 +162,17 @@ pub fn syntax_goto_definition(cx: &mut Context) {
     let text = doc.text().slice(..);
     let sel = doc.selection(view.id).clone().primary().slice(text);
     let loader = cx.editor.syn_loader.load();
-    let tags = tags_iter(syntax, &loader, text, UriOrDocumentId::Id(doc.id()), None);
+
+    let mut rope_regex_builder = rope::RegexBuilder::new();
+    rope_regex_builder.syntax(rope::Config::new());
+    let re = rope_regex_builder.build(format!("^{sel}$").as_str());
+    let tags = tags_iter(
+        syntax,
+        &loader,
+        text,
+        UriOrDocumentId::Id(doc.id()),
+        re.as_ref().ok(),
+    );
 
     let mut definition = None;
     for tag in tags {
@@ -175,6 +187,142 @@ pub fn syntax_goto_definition(cx: &mut Context) {
         let err = format!("No definition found, text = {:?}", sel);
         cx.editor.set_error(err);
     }
+}
+
+#[derive(Debug)]
+struct SearchState {
+    searcher_builder: SearcherBuilder,
+    walk_builder: WalkBuilder,
+    regex_matcher_builder: RegexMatcherBuilder,
+    rope_regex_builder: rope::RegexBuilder,
+    search_root: PathBuf,
+    /// A cache of files that have been parsed in prior searches.
+    syntax_cache: DashMap<PathBuf, Option<(Rope, Syntax)>>,
+}
+
+fn get_workspace_tags(
+    query: &str,
+    editor: &mut Editor,
+    state: Arc<SearchState>,
+    injector: &Injector<Tag, SearchState>,
+) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
+    if query.len() < 3 {
+        return async { Ok(()) }.boxed();
+    }
+    // Attempt to find the tag in any open documents.
+    let pattern = match state.rope_regex_builder.build(query) {
+        Ok(pattern) => pattern,
+        Err(err) => return async { Err(anyhow::anyhow!(err)) }.boxed(),
+    };
+    let loader = editor.syn_loader.load();
+    for doc in editor.documents() {
+        let Some(syntax) = doc.syntax() else { continue };
+        let text = doc.text().slice(..);
+        let uri_or_id = doc
+            .uri()
+            .map(UriOrDocumentId::Uri)
+            .unwrap_or_else(|| UriOrDocumentId::Id(doc.id()));
+        for tag in tags_iter(syntax, &loader, text.slice(..), uri_or_id, Some(&pattern)) {
+            if injector.push(tag).is_err() {
+                return async { Ok(()) }.boxed();
+            }
+        }
+    }
+    if !state.search_root.exists() {
+        return async { Err(anyhow::anyhow!("Current working directory does not exist")) }.boxed();
+    }
+    let matcher = match state.regex_matcher_builder.build(query) {
+        Ok(matcher) => {
+            // Clear any "Failed to compile regex" errors out of the statusline.
+            editor.clear_status();
+            matcher
+        }
+        Err(err) => {
+            log::info!(
+                "Failed to compile search pattern in workspace symbol search: {}",
+                err
+            );
+            return async { Err(anyhow::anyhow!("Failed to compile regex")) }.boxed();
+        }
+    };
+    let pattern = Arc::new(pattern);
+    let injector = injector.clone();
+    let loader = editor.syn_loader.load();
+    let documents: HashSet<_> = editor
+        .documents()
+        .filter_map(Document::path)
+        .cloned()
+        .collect();
+    async move {
+        let searcher = state.searcher_builder.build();
+        state.walk_builder.build_parallel().run(|| {
+            let mut searcher = searcher.clone();
+            let matcher = matcher.clone();
+            let injector = injector.clone();
+            let loader = loader.clone();
+            let documents = &documents;
+            let pattern = pattern.clone();
+            let syntax_cache = &state.syntax_cache;
+            Box::new(move |entry: Result<DirEntry, ignore::Error>| -> WalkState {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => return WalkState::Continue,
+                };
+                match entry.file_type() {
+                    Some(entry) if entry.is_file() => {}
+                    // skip everything else
+                    _ => return WalkState::Continue,
+                };
+                let path = entry.path();
+                // If this document is open, skip it because we've already processed it above.
+                if documents.contains(path) {
+                    return WalkState::Continue;
+                };
+                let mut quit = false;
+                let sink = sinks::UTF8(|_line, _content| {
+                    if !syntax_cache.contains_key(path) {
+                        // Read the file into a Rope and attempt to recognize the language
+                        // and parse it with tree-sitter. Save the Rope and Syntax for future
+                        // queries.
+                        syntax_cache.insert(path.to_path_buf(), syntax_for_path(path, &loader));
+                    };
+                    let entry = syntax_cache.get(path).unwrap();
+                    let Some((text, syntax)) = entry.value() else {
+                        // If the file couldn't be parsed, move on.
+                        return Ok(false);
+                    };
+                    let uri = Uri::from(path::normalize(path));
+                    for tag in tags_iter(
+                        syntax,
+                        &loader,
+                        text.slice(..),
+                        UriOrDocumentId::Uri(uri),
+                        Some(&pattern),
+                    ) {
+                        if injector.push(tag).is_err() {
+                            quit = true;
+                            break;
+                        }
+                    }
+                    // Quit after seeing the first regex match. We only care to find files
+                    // that contain the pattern and then we run the tags query within
+                    // those. The location and contents of a match are irrelevant - it's
+                    // only important _if_ a file matches.
+                    Ok(false)
+                });
+                if let Err(err) = searcher.search_path(&matcher, path, sink) {
+                    log::info!("Workspace syntax search error: {}, {}", path.display(), err);
+                }
+                if quit {
+                    WalkState::Quit
+                } else {
+                    WalkState::Continue
+                }
+            })
+        });
+        Ok(())
+    }
+    .boxed()
 }
 
 pub fn syntax_symbol_picker(cx: &mut Context) {
@@ -217,18 +365,8 @@ pub fn syntax_symbol_picker(cx: &mut Context) {
     cx.push_layer(Box::new(overlaid(picker)));
 }
 
+// TODO: use get_tags for generic goto_definiton
 pub fn syntax_workspace_symbol_picker(cx: &mut Context) {
-    #[derive(Debug)]
-    struct SearchState {
-        searcher_builder: SearcherBuilder,
-        walk_builder: WalkBuilder,
-        regex_matcher_builder: RegexMatcherBuilder,
-        rope_regex_builder: rope::RegexBuilder,
-        search_root: PathBuf,
-        /// A cache of files that have been parsed in prior searches.
-        syntax_cache: DashMap<PathBuf, Option<(Rope, Syntax)>>,
-    }
-
     let mut searcher_builder = SearcherBuilder::new();
     searcher_builder.binary_detection(BinaryDetection::quit(b'\x00'));
 
@@ -298,129 +436,6 @@ pub fn syntax_workspace_symbol_picker(cx: &mut Context) {
         }),
     ];
 
-    let get_tags = |query: &str,
-                    editor: &mut Editor,
-                    state: Arc<SearchState>,
-                    injector: &Injector<_, _>| {
-        if query.len() < 3 {
-            return async { Ok(()) }.boxed();
-        }
-        // Attempt to find the tag in any open documents.
-        let pattern = match state.rope_regex_builder.build(query) {
-            Ok(pattern) => pattern,
-            Err(err) => return async { Err(anyhow::anyhow!(err)) }.boxed(),
-        };
-        let loader = editor.syn_loader.load();
-        for doc in editor.documents() {
-            let Some(syntax) = doc.syntax() else { continue };
-            let text = doc.text().slice(..);
-            let uri_or_id = doc
-                .uri()
-                .map(UriOrDocumentId::Uri)
-                .unwrap_or_else(|| UriOrDocumentId::Id(doc.id()));
-            for tag in tags_iter(syntax, &loader, text.slice(..), uri_or_id, Some(&pattern)) {
-                if injector.push(tag).is_err() {
-                    return async { Ok(()) }.boxed();
-                }
-            }
-        }
-        if !state.search_root.exists() {
-            return async { Err(anyhow::anyhow!("Current working directory does not exist")) }
-                .boxed();
-        }
-        let matcher = match state.regex_matcher_builder.build(query) {
-            Ok(matcher) => {
-                // Clear any "Failed to compile regex" errors out of the statusline.
-                editor.clear_status();
-                matcher
-            }
-            Err(err) => {
-                log::info!(
-                    "Failed to compile search pattern in workspace symbol search: {}",
-                    err
-                );
-                return async { Err(anyhow::anyhow!("Failed to compile regex")) }.boxed();
-            }
-        };
-        let pattern = Arc::new(pattern);
-        let injector = injector.clone();
-        let loader = editor.syn_loader.load();
-        let documents: HashSet<_> = editor
-            .documents()
-            .filter_map(Document::path)
-            .cloned()
-            .collect();
-        async move {
-            let searcher = state.searcher_builder.build();
-            state.walk_builder.build_parallel().run(|| {
-                let mut searcher = searcher.clone();
-                let matcher = matcher.clone();
-                let injector = injector.clone();
-                let loader = loader.clone();
-                let documents = &documents;
-                let pattern = pattern.clone();
-                let syntax_cache = &state.syntax_cache;
-                Box::new(move |entry: Result<DirEntry, ignore::Error>| -> WalkState {
-                    let entry = match entry {
-                        Ok(entry) => entry,
-                        Err(_) => return WalkState::Continue,
-                    };
-                    match entry.file_type() {
-                        Some(entry) if entry.is_file() => {}
-                        // skip everything else
-                        _ => return WalkState::Continue,
-                    };
-                    let path = entry.path();
-                    // If this document is open, skip it because we've already processed it above.
-                    if documents.contains(path) {
-                        return WalkState::Continue;
-                    };
-                    let mut quit = false;
-                    let sink = sinks::UTF8(|_line, _content| {
-                        if !syntax_cache.contains_key(path) {
-                            // Read the file into a Rope and attempt to recognize the language
-                            // and parse it with tree-sitter. Save the Rope and Syntax for future
-                            // queries.
-                            syntax_cache.insert(path.to_path_buf(), syntax_for_path(path, &loader));
-                        };
-                        let entry = syntax_cache.get(path).unwrap();
-                        let Some((text, syntax)) = entry.value() else {
-                            // If the file couldn't be parsed, move on.
-                            return Ok(false);
-                        };
-                        let uri = Uri::from(path::normalize(path));
-                        for tag in tags_iter(
-                            syntax,
-                            &loader,
-                            text.slice(..),
-                            UriOrDocumentId::Uri(uri),
-                            Some(&pattern),
-                        ) {
-                            if injector.push(tag).is_err() {
-                                quit = true;
-                                break;
-                            }
-                        }
-                        // Quit after seeing the first regex match. We only care to find files
-                        // that contain the pattern and then we run the tags query within
-                        // those. The location and contents of a match are irrelevant - it's
-                        // only important _if_ a file matches.
-                        Ok(false)
-                    });
-                    if let Err(err) = searcher.search_path(&matcher, path, sink) {
-                        log::info!("Workspace syntax search error: {}, {}", path.display(), err);
-                    }
-                    if quit {
-                        WalkState::Quit
-                    } else {
-                        WalkState::Continue
-                    }
-                })
-            });
-            Ok(())
-        }
-        .boxed()
-    };
     let picker = Picker::new(
         columns,
         1, // name
@@ -451,7 +466,7 @@ pub fn syntax_workspace_symbol_picker(cx: &mut Context) {
             }
         },
     )
-    .with_dynamic_query(get_tags, Some(275))
+    .with_dynamic_query(get_workspace_tags, Some(275))
     .with_preview(move |_editor, tag| {
         Some((
             tag.doc.path_or_id()?,
