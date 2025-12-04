@@ -47,6 +47,7 @@ use helix_core::{
 use helix_view::{
     document::{FormatterError, MarkerName, Mode, SearchMatch, SearchMatchLimit, SCRATCH_BUFFER_NAME},
     editor::{Action, OptionToml, SearchConfig},
+    expansion,
     info::Info,
     input::KeyEvent,
     keyboard::KeyCode,
