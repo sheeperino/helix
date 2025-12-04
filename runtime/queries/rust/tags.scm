@@ -1,6 +1,9 @@
 (struct_item
   name: (type_identifier) @definition.struct)
 
+(type_item
+  name: (type_identifier) @definition.type)
+
 (const_item
   name: (identifier) @definition.constant)
 
